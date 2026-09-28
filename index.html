@@ -43,16 +43,6 @@
       font-size: 1.05rem;
     }
     .item:last-child { border-bottom: none; }
-    .editar {
-      background: #e5e7eb;
-      color: #222;
-      border: none;
-      border-radius: 6px;
-      padding: 4px 8px;
-      font-size: 0.85rem;
-      cursor: pointer;
-      margin-right: 6px;
-    }
     .borrar {
       background: #ef4444;
       color: white;
@@ -109,7 +99,6 @@
   </style>
 </head>
 <body>
-
   <h1>Pedido por Voz</h1>
 
   <div class="fase" id="faseNumero">
@@ -140,8 +129,7 @@
 
   <script>
     // ======================
-    // CAPTURA DE ERRORES VISIBLE EN PANTALLA
-    // (así puedes ver el fallo en el propio iPhone, sin consola)
+    // CAPTURA DE ERRORES
     // ======================
     function mostrarError(msg) {
       const el = document.getElementById("estado");
@@ -169,7 +157,7 @@
     let supabaseClient = null;
     try {
       if (!window.supabase) {
-        throw new Error("La librería de Supabase no cargó (revisa tu conexión o un bloqueador de contenido en Safari).");
+        throw new Error("La librería de Supabase no cargó");
       }
       supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     } catch (err) {
@@ -177,14 +165,14 @@
     }
 
     // ======================
-    // ESTADO DE LA APP
+    // ESTADO
     // ======================
     let estado = {
       id: null,
       nombre: null,
       nombreLibre: null,
       lista: [],
-      fase: "numero" // numero | nombre | articulos
+      fase: "numero"
     };
 
     // ======================
@@ -208,40 +196,42 @@
 
       recognition.onend = () => {
         if (escuchando) {
-          setTimeout(() => recognition.start(), 300);
+          setTimeout(() => {
+            try { recognition.start(); } catch(e) {}
+          }, 300);
         }
       };
 
       recognition.onerror = (e) => {
         console.error("Error de voz:", e.error);
-        mostrarError("Micrófono: " + e.error);
+        if (e.error === "not-allowed") {
+          mostrarError("Permiso de micrófono denegado");
+        } else {
+          document.getElementById("estado").textContent = "Error micrófono: " + e.error;
+        }
       };
     } else {
-      mostrarError("Tu navegador no soporta reconocimiento de voz. Usa Safari o Chrome actualizados.");
+      mostrarError("Tu navegador no soporta reconocimiento de voz. Usa Safari.");
     }
 
     // ======================
-    // BUSCAR CLIENTE EN SUPABASE
+    // BUSCAR CLIENTE
     // ======================
     async function buscarCliente(codigo) {
-      if (!supabaseClient) {
-        mostrarError("Supabase no está disponible, no se puede buscar el cliente.");
-        return null;
-      }
+      if (!supabaseClient) return null;
+
       const { data, error } = await supabaseClient
         .from("clientes")
         .select("nombre")
         .eq("id", codigo)
         .single();
 
-      if (error || !data) {
-        return null;
-      }
+      if (error || !data) return null;
       return data.nombre;
     }
 
     // ======================
-    // PROCESAR LO QUE DICE
+    // PROCESAR TEXTO
     // ======================
     async function procesarTexto(texto) {
       if (estado.fase === "numero") {
@@ -249,9 +239,7 @@
         if (match) {
           const codigo = match[0];
           document.getElementById("estado").textContent = "Buscando cliente...";
-
           const nombre = await buscarCliente(codigo);
-
           if (nombre) {
             estado.id = codigo;
             estado.nombre = nombre;
@@ -265,14 +253,12 @@
           document.getElementById("estado").textContent = "No detecté un número. Di el código del cliente.";
         }
       }
-
       else if (estado.fase === "nombre") {
         estado.nombreLibre = texto;
         estado.fase = "articulos";
         actualizarPantalla();
         document.getElementById("estado").textContent = "Nombre guardado. Ya puedes dictar los artículos.";
       }
-
       else if (estado.fase === "articulos") {
         const item = parsearArticulo(texto);
         estado.lista.push(item);
@@ -282,45 +268,81 @@
     }
 
     // ======================
-    // NÚMEROS EN PALABRAS (por si el reconocimiento de voz
-    // transcribe "cinco" en vez del dígito "5")
+    // NÚMEROS EN TEXTO
     // ======================
     const NUMEROS_TEXTO = {
       "un": 1, "uno": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
       "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
       "once": 11, "doce": 12, "trece": 13, "catorce": 14, "quince": 15,
       "dieciseis": 16, "dieciséis": 16, "diecisiete": 17, "dieciocho": 18, "diecinueve": 19,
-      "veinte": 20, "veintiuno": 21, "veintidos": 22, "veintidós": 22, "veintitres": 23, "veintitrés": 23,
-      "veinticuatro": 24, "veinticinco": 25, "veintiseis": 26, "veintiséis": 26,
-      "veintisiete": 27, "veintiocho": 28, "veintinueve": 29,
+      "veinte": 20, "veintiuno": 21, "veintidos": 22, "veintidós": 22,
+      "veintitres": 23, "veintitrés": 23, "veinticuatro": 24, "veinticinco": 25,
+      "veintiseis": 26, "veintiséis": 26, "veintisiete": 27, "veintiocho": 28, "veintinueve": 29,
       "treinta": 30, "cuarenta": 40, "cincuenta": 50, "sesenta": 60,
       "setenta": 70, "ochenta": 80, "noventa": 90, "cien": 100
     };
 
+    // ======================
+    // LIMPIAR DESCRIPCIÓN
+    // ======================
+    function limpiarDescripcion(texto) {
+      let desc = texto.toLowerCase().trim();
+
+      // --- Pilas AA / AAA ---
+      desc = desc.replace(/\btriple\s*a+\b/gi, "AAA");
+      desc = desc.replace(/\bdoble\s*a+\b/gi, "AA");
+      desc = desc.replace(/\btriple\s*aaa\b/gi, "AAA");
+      desc = desc.replace(/\bdoble\s*aa\b/gi, "AA");
+
+      // --- Convertir metros a milímetros ---
+      // Ejemplos: "2 metros", "2,5 metros", "2.5 m", "2 metros de cable"
+      desc = desc.replace(/(\d+[.,]?\d*)\s*(metros?|m)\b/gi, (match, num) => {
+        const valor = parseFloat(num.replace(",", "."));
+        return (valor * 1000) + " mm";
+      });
+
+      // --- Convertir centímetros a milímetros ---
+      // Ejemplos: "50 cm", "50 centímetros", "12,5 cm"
+      desc = desc.replace(/(\d+[.,]?\d*)\s*(centímetros?|centimetros?|cm)\b/gi, (match, num) => {
+        const valor = parseFloat(num.replace(",", "."));
+        return (valor * 10) + " mm";
+      });
+
+      // Poner en mayúscula la primera letra
+      if (desc.length > 0) {
+        desc = desc.charAt(0).toUpperCase() + desc.slice(1);
+      }
+
+      return desc;
+    }
+
+    // ======================
+    // PARSEAR ARTÍCULO
+    // ======================
     function parsearArticulo(texto) {
       const palabras = texto.trim().split(/\s+/);
       const primera = (palabras[0] || "").toLowerCase().replace(/[.,]/g, "");
 
-      // Caso 1: empieza con un dígito, ej. "5 tornillos del 8"
+      let cantidad = 1;
+      let descripcion = texto.trim();
+
+      // Caso 1: empieza con número (5 tornillos...)
       if (/^\d+$/.test(primera)) {
-        return {
-          cantidad: parseInt(primera, 10),
-          descripcion: palabras.slice(1).join(" ").trim()
-        };
+        cantidad = parseInt(primera, 10);
+        descripcion = palabras.slice(1).join(" ").trim();
+      }
+      // Caso 2: empieza con número en palabras (cinco tornillos...)
+      else if (primera in NUMEROS_TEXTO) {
+        cantidad = NUMEROS_TEXTO[primera];
+        descripcion = palabras.slice(1).join(" ").trim();
       }
 
-      // Caso 2: empieza con un número en palabras, ej. "cinco tornillos del 8"
-      if (primera in NUMEROS_TEXTO) {
-        return {
-          cantidad: NUMEROS_TEXTO[primera],
-          descripcion: palabras.slice(1).join(" ").trim()
-        };
-      }
+      // Limpiamos la descripción (triple a, metros, cm, etc.)
+      descripcion = limpiarDescripcion(descripcion);
 
-      // Caso 3: no se detectó cantidad, se asume 1
       return {
-        cantidad: 1,
-        descripcion: texto.trim()
+        cantidad: cantidad,
+        descripcion: descripcion
       };
     }
 
@@ -345,10 +367,7 @@
         listaDiv.innerHTML = estado.lista.map((item, i) => `
           <div class="item">
             <span>${item.cantidad} ${item.descripcion}</span>
-            <span>
-              <button class="editar" onclick="editarItem(${i})">✏️</button>
-              <button class="borrar" onclick="borrarItem(${i})">✕</button>
-            </span>
+            <button class="borrar" onclick="borrarItem(${i})">✕</button>
           </div>
         `).join("");
       }
@@ -359,13 +378,14 @@
       actualizarPantalla();
     }
 
-    function editarItem(index) {
-      const item = estado.lista[index];
-      const actual = `${item.cantidad} ${item.descripcion}`;
-      const nuevo = prompt("Edita el artículo (cantidad y descripción):", actual);
-      if (nuevo === null || nuevo.trim() === "") return;
-      estado.lista[index] = parsearArticulo(nuevo.trim());
-      actualizarPantalla();
+    // ======================
+    // GENERAR TEXTO DEL PEDIDO
+    // ======================
+    function generarTextoPedido() {
+      let texto = `PRECIO PLAZO ${estado.id || ""} ${estado.nombre || ""}\n`;
+      texto += `${estado.nombreLibre || ""}\n\n`;
+      texto += estado.lista.map(i => `${i.cantidad} ${i.descripcion}`).join("\n");
+      return texto.trim();
     }
 
     // ======================
@@ -373,7 +393,7 @@
     // ======================
     document.getElementById("btnEscuchar").addEventListener("click", () => {
       if (!recognition) {
-        mostrarError("El reconocimiento de voz no está disponible en este navegador.");
+        mostrarError("Reconocimiento de voz no disponible");
         return;
       }
 
@@ -388,15 +408,14 @@
         escuchando = true;
         try {
           recognition.start();
+          document.getElementById("btnEscuchar").textContent = "⏹ Dejar de escuchar";
+          document.getElementById("btnEscuchar").classList.add("escuchando");
+          document.getElementById("estado").textContent = "Escuchando... habla ahora";
+          document.getElementById("estado").classList.remove("error");
         } catch (err) {
           mostrarError("No se pudo iniciar el micrófono: " + err.message);
           escuchando = false;
-          return;
         }
-        document.getElementById("btnEscuchar").textContent = "⏹ Dejar de escuchar";
-        document.getElementById("btnEscuchar").classList.add("escuchando");
-        document.getElementById("estado").textContent = "Escuchando... habla ahora";
-        document.getElementById("estado").classList.remove("error");
       }
     });
 
@@ -410,10 +429,7 @@
         return;
       }
 
-      let mensaje = `Precio plazo ${estado.nombre}\n`;
-      mensaje += `${estado.nombreLibre || ""}\n\n`;
-      mensaje += estado.lista.map(i => `${i.cantidad} ${i.descripcion}`).join("\n");
-
+      const mensaje = generarTextoPedido();
       const url = `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
       window.open(url, "_blank");
     });
