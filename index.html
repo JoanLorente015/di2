@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Pedido Voz - Ferretería</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #222;
+      padding: 16px;
+      max-width: 480px;
+      margin: 0 auto;
+      min-height: 100vh;
+    }
+    h1 { font-size: 1.4rem; margin-bottom: 12px; text-align: center; }
+    .fase {
+      background: #fff;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+    .fase.active { border: 2px solid #2563eb; }
+    .fase h2 { font-size: 1rem; color: #555; margin-bottom: 6px; }
+    .valor { font-size: 1.3rem; font-weight: 600; }
+    #lista {
+      background: #fff;
+      border-radius: 12px;
+      padding: 12px;
+      min-height: 120px;
+      margin-bottom: 16px;
+    }
+    .item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #eee;
+      font-size: 1.05rem;
+    }
+    .item:last-child { border-bottom: none; }
+    .borrar {
+      background: #ef4444;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .botones {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    button {
+      padding: 16px;
+      font-size: 1.15rem;
+      border: none;
+      border-radius: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #btnEscuchar {
+      background: #2563eb;
+      color: white;
+    }
+    #btnEscuchar.escuchando {
+      background: #dc2626;
+      animation: pulse 1.5s infinite;
+    }
+    #btnEnviar {
+      background: #16a34a;
+      color: white;
+    }
+    #btnReiniciar {
+      background: #6b7280;
+      color: white;
+    }
+    .estado {
+      text-align: center;
+      font-size: 0.95rem;
+      color: #666;
+      margin: 8px 0 12px;
+    }
+    .estado.error {
+      color: #dc2626;
+      font-weight: 600;
+    }
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.7; }
+      100% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Pedido por Voz</h1>
+
+  <div class="fase" id="faseNumero">
+    <h2>1. Número de cliente</h2>
+    <div class="valor" id="mostrarNumero">—</div>
+  </div>
+
+  <div class="fase" id="faseNombre">
+    <h2>2. Nombre del cliente (lo dices tú)</h2>
+    <div class="valor" id="mostrarNombre">—</div>
+  </div>
+
+  <div class="fase" id="faseArticulos">
+    <h2>3. Artículos</h2>
+  </div>
+
+  <div id="lista">
+    <div style="color:#999; text-align:center; padding:20px 0;">Aún no hay artículos</div>
+  </div>
+
+  <div class="estado" id="estado">Pulsa "Empezar a escuchar"</div>
+
+  <div class="botones">
+    <button id="btnEscuchar">🎤 Empezar a escuchar</button>
+    <button id="btnEnviar">📤 Enviar por WhatsApp</button>
+    <button id="btnReiniciar">🔄 Nuevo pedido</button>
+  </div>
+
+  <script>
+    // ======================
+    // CAPTURA DE ERRORES VISIBLE EN PANTALLA
+    // (así puedes ver el fallo en el propio iPhone, sin consola)
+    // ======================
+    function mostrarError(msg) {
+      const el = document.getElementById("estado");
+      if (el) {
+        el.textContent = "ERROR: " + msg;
+        el.classList.add("error");
+      }
+      console.error(msg);
+    }
+
+    window.addEventListener("error", (e) => {
+      mostrarError(e.message);
+    });
+
+    window.addEventListener("unhandledrejection", (e) => {
+      mostrarError(e.reason && e.reason.message ? e.reason.message : String(e.reason));
+    });
+
+    // ======================
+    // CONFIGURACIÓN SUPABASE
+    // ======================
+    const SUPABASE_URL = "https://arthqcpqbmsjdhvubwwm.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFydGhxY3BxYm1zamRodnVid3dtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA2MDg3MjcsImV4cCI6MjEwNjE4NDcyN30.D3lklXpb6ueY_TsXBlTJcuVqJx-cJtqVtv1n1leESAA";
+
+    let supabaseClient = null;
+    try {
+      if (!window.supabase) {
+        throw new Error("La librería de Supabase no cargó (revisa tu conexión o un bloqueador de contenido en Safari).");
+      }
+      supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } catch (err) {
+      mostrarError(err.message);
+    }
+
+    // ======================
+    // ESTADO DE LA APP
+    // ======================
+    let estado = {
+      id: null,
+      nombre: null,
+      nombreLibre: null,
+      lista: [],
+      fase: "numero" // numero | nombre | articulos
+    };
+
+    // ======================
+    // RECONOCIMIENTO DE VOZ
+    // ======================
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let escuchando = false;
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.lang = "es-ES";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onresult = (event) => {
+        const texto = event.results[0][0].transcript.trim();
+        console.log("Oído:", texto);
+        procesarTexto(texto);
+      };
+
+      recognition.onend = () => {
+        if (escuchando) {
+          setTimeout(() => recognition.start(), 300);
+        }
+      };
+
+      recognition.onerror = (e) => {
+        console.error("Error de voz:", e.error);
+        mostrarError("Micrófono: " + e.error);
+      };
+    } else {
+      mostrarError("Tu navegador no soporta reconocimiento de voz. Usa Safari o Chrome actualizados.");
+    }
+
+    // ======================
+    // BUSCAR CLIENTE EN SUPABASE
+    // ======================
+    async function buscarCliente(codigo) {
+      if (!supabaseClient) {
+        mostrarError("Supabase no está disponible, no se puede buscar el cliente.");
+        return null;
+      }
+      const { data, error } = await supabaseClient
+        .from("clientes")
+        .select("nombre")
+        .eq("id", codigo)
+        .single();
+
+      if (error || !data) {
+        return null;
+      }
+      return data.nombre;
+    }
+
+    // ======================
+    // PROCESAR LO QUE DICE
+    // ======================
+    async function procesarTexto(texto) {
+      if (estado.fase === "numero") {
+        const match = texto.match(/\d{3,5}/);
+        if (match) {
+          const codigo = match[0];
+          document.getElementById("estado").textContent = "Buscando cliente...";
+
+          const nombre = await buscarCliente(codigo);
+
+          if (nombre) {
+            estado.id = codigo;
+            estado.nombre = nombre;
+            estado.fase = "nombre";
+            actualizarPantalla();
+            document.getElementById("estado").textContent = "Número encontrado. Ahora di el nombre del cliente.";
+          } else {
+            document.getElementById("estado").textContent = `No existe el cliente ${codigo}. Di otro número.`;
+          }
+        } else {
+          document.getElementById("estado").textContent = "No detecté un número. Di el código del cliente.";
+        }
+      }
+
+      else if (estado.fase === "nombre") {
+        estado.nombreLibre = texto;
+        estado.fase = "articulos";
+        actualizarPantalla();
+        document.getElementById("estado").textContent = "Nombre guardado. Ya puedes dictar los artículos.";
+      }
+
+      else if (estado.fase === "articulos") {
+        const item = parsearArticulo(texto);
+        estado.lista.push(item);
+        actualizarPantalla();
+        document.getElementById("estado").textContent = "Artículo añadido. Sigue dictando o envía.";
+      }
+    }
+
+    // ======================
+    // NÚMEROS EN PALABRAS (por si el reconocimiento de voz
+    // transcribe "cinco" en vez del dígito "5")
+    // ======================
+    const NUMEROS_TEXTO = {
+      "un": 1, "uno": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+      "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
+      "once": 11, "doce": 12, "trece": 13, "catorce": 14, "quince": 15,
+      "dieciseis": 16, "dieciséis": 16, "diecisiete": 17, "dieciocho": 18, "diecinueve": 19,
+      "veinte": 20, "veintiuno": 21, "veintidos": 22, "veintidós": 22, "veintitres": 23, "veintitrés": 23,
+      "veinticuatro": 24, "veinticinco": 25, "veintiseis": 26, "veintiséis": 26,
+      "veintisiete": 27, "veintiocho": 28, "veintinueve": 29,
+      "treinta": 30, "cuarenta": 40, "cincuenta": 50, "sesenta": 60,
+      "setenta": 70, "ochenta": 80, "noventa": 90, "cien": 100
+    };
+
+    function parsearArticulo(texto) {
+      const palabras = texto.trim().split(/\s+/);
+      const primera = (palabras[0] || "").toLowerCase().replace(/[.,]/g, "");
+
+      // Caso 1: empieza con un dígito, ej. "5 tornillos del 8"
+      if (/^\d+$/.test(primera)) {
+        return {
+          cantidad: parseInt(primera, 10),
+          descripcion: palabras.slice(1).join(" ").trim()
+        };
+      }
+
+      // Caso 2: empieza con un número en palabras, ej. "cinco tornillos del 8"
+      if (primera in NUMEROS_TEXTO) {
+        return {
+          cantidad: NUMEROS_TEXTO[primera],
+          descripcion: palabras.slice(1).join(" ").trim()
+        };
+      }
+
+      // Caso 3: no se detectó cantidad, se asume 1
+      return {
+        cantidad: 1,
+        descripcion: texto.trim()
+      };
+    }
+
+    // ======================
+    // ACTUALIZAR PANTALLA
+    // ======================
+    function actualizarPantalla() {
+      document.getElementById("mostrarNumero").textContent =
+        estado.id ? `${estado.id} ${estado.nombre}` : "—";
+
+      document.getElementById("mostrarNombre").textContent =
+        estado.nombreLibre || "—";
+
+      document.getElementById("faseNumero").classList.toggle("active", estado.fase === "numero");
+      document.getElementById("faseNombre").classList.toggle("active", estado.fase === "nombre");
+      document.getElementById("faseArticulos").classList.toggle("active", estado.fase === "articulos");
+
+      const listaDiv = document.getElementById("lista");
+      if (estado.lista.length === 0) {
+        listaDiv.innerHTML = `<div style="color:#999; text-align:center; padding:20px 0;">Aún no hay artículos</div>`;
+      } else {
+        listaDiv.innerHTML = estado.lista.map((item, i) => `
+          <div class="item">
+            <span>${item.cantidad} ${item.descripcion}</span>
+            <button class="borrar" onclick="borrarItem(${i})">✕</button>
+          </div>
+        `).join("");
+      }
+    }
+
+    function borrarItem(index) {
+      estado.lista.splice(index, 1);
+      actualizarPantalla();
+    }
+
+    // ======================
+    // BOTONES
+    // ======================
+    document.getElementById("btnEscuchar").addEventListener("click", () => {
+      if (!recognition) {
+        mostrarError("El reconocimiento de voz no está disponible en este navegador.");
+        return;
+      }
+
+      if (escuchando) {
+        escuchando = false;
+        recognition.stop();
+        document.getElementById("btnEscuchar").textContent = "🎤 Empezar a escuchar";
+        document.getElementById("btnEscuchar").classList.remove("escuchando");
+        document.getElementById("estado").textContent = "Escucha detenida";
+        document.getElementById("estado").classList.remove("error");
+      } else {
+        escuchando = true;
+        try {
+          recognition.start();
+        } catch (err) {
+          mostrarError("No se pudo iniciar el micrófono: " + err.message);
+          escuchando = false;
+          return;
+        }
+        document.getElementById("btnEscuchar").textContent = "⏹ Dejar de escuchar";
+        document.getElementById("btnEscuchar").classList.add("escuchando");
+        document.getElementById("estado").textContent = "Escuchando... habla ahora";
+        document.getElementById("estado").classList.remove("error");
+      }
+    });
+
+    document.getElementById("btnEnviar").addEventListener("click", () => {
+      if (!estado.id) {
+        alert("Primero tienes que decir el número de cliente");
+        return;
+      }
+      if (estado.lista.length === 0) {
+        alert("No hay artículos en el pedido");
+        return;
+      }
+
+      let mensaje = `PRECIO PLAZO ${estado.id} ${estado.nombre}\n`;
+      mensaje += `${estado.nombreLibre || ""}\n\n`;
+      mensaje += estado.lista.map(i => `${i.cantidad} ${i.descripcion}`).join("\n");
+
+      const url = `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
+      window.open(url, "_blank");
+    });
+
+    document.getElementById("btnReiniciar").addEventListener("click", () => {
+      estado = {
+        id: null,
+        nombre: null,
+        nombreLibre: null,
+        lista: [],
+        fase: "numero"
+      };
+      actualizarPantalla();
+      document.getElementById("estado").textContent = "Pedido reiniciado. Di el número de cliente.";
+      document.getElementById("estado").classList.remove("error");
+    });
+
+    // Inicial
+    actualizarPantalla();
+  </script>
+</body>
+</html>
