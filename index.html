@@ -43,6 +43,16 @@
       font-size: 1.05rem;
     }
     .item:last-child { border-bottom: none; }
+    .editar {
+      background: #e5e7eb;
+      color: #222;
+      border: none;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      margin-right: 6px;
+    }
     .borrar {
       background: #ef4444;
       color: white;
@@ -335,7 +345,10 @@
         listaDiv.innerHTML = estado.lista.map((item, i) => `
           <div class="item">
             <span>${item.cantidad} ${item.descripcion}</span>
-            <button class="borrar" onclick="borrarItem(${i})">✕</button>
+            <span>
+              <button class="editar" onclick="editarItem(${i})">✏️</button>
+              <button class="borrar" onclick="borrarItem(${i})">✕</button>
+            </span>
           </div>
         `).join("");
       }
@@ -343,6 +356,15 @@
 
     function borrarItem(index) {
       estado.lista.splice(index, 1);
+      actualizarPantalla();
+    }
+
+    function editarItem(index) {
+      const item = estado.lista[index];
+      const actual = `${item.cantidad} ${item.descripcion}`;
+      const nuevo = prompt("Edita el artículo (cantidad y descripción):", actual);
+      if (nuevo === null || nuevo.trim() === "") return;
+      estado.lista[index] = parsearArticulo(nuevo.trim());
       actualizarPantalla();
     }
 
@@ -388,7 +410,7 @@
         return;
       }
 
-      let mensaje = `PRECIO PLAZO ${estado.id} ${estado.nombre}\n`;
+      let mensaje = `Precio plazo ${estado.nombre}\n`;
       mensaje += `${estado.nombreLibre || ""}\n\n`;
       mensaje += estado.lista.map(i => `${i.cantidad} ${i.descripcion}`).join("\n");
 
